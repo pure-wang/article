@@ -4,26 +4,23 @@ cd /d "%~dp0"
 
 rem ---------------------------------------------------------------------------
 rem  Double-click to pull the latest daily reports into this Obsidian vault.
+rem  All Chinese output lives in sync_reports.py (Python prints Unicode correctly).
+rem  This wrapper stays pure ASCII: a .bat file is parsed with the OEM code page,
+rem  so UTF-8 Chinese in here breaks the parser on another machine.
 rem
-rem  All Chinese output lives in sync_reports.py - Python prints Unicode correctly to the
-rem  Windows console. This wrapper stays pure ASCII on purpose: a .bat file is
-rem  parsed with the OEM code page, so UTF-8 Chinese in here breaks the parser.
-rem  Keep this file saved as GBK anyway, because the script name below is Chinese.
-rem
-rem  Python lookup, in order:
-rem    1) python on PATH
-rem    2) the managed install, version read from the "current" marker file
-rem    3) any version directory that has a python.exe
+rem  Python lookup: PATH, then common install locations, then DSH runtime.
 rem ---------------------------------------------------------------------------
 
 set "PY="
 
-
 where python >nul 2>nul && set "PY=python"
 if defined PY goto run
 
+for %%P in (  "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"  "%LOCALAPPDATA%\Programs\Python\Python311\python.exe"  "%LOCALAPPDATA%\Programs\Python\Python310\python.exe"  "C:\Program Files\Python312\python.exe"  "C:\Program Files\Python311\python.exe"
+) do if exist "%%~P" set "PY=%%~P"
 
-for /d %%d in ("%PYROOT%\*") do if exist "%%d\python.exe" set "PY=%%d\python.exe"
+if not defined PY for /d %%D in ("%USERPROFILE%\.dsh\dsh-runtimes\*") do if exist "%%D\python.exe" set "PY=%%D\python.exe"
+
 if defined PY goto run
 
 echo [ERROR] Python not found. Install Python 3.10+ and run this again.
