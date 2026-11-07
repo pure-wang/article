@@ -17,15 +17,11 @@ rem    3) any version directory that has a python.exe
 rem ---------------------------------------------------------------------------
 
 set "PY="
-set "PYROOT=C:\Users\wangs\.workbuddy\binaries\python\versions"
+
 
 where python >nul 2>nul && set "PY=python"
 if defined PY goto run
 
-set "PYVER="
-if exist "%PYROOT%\current" set /p PYVER=<"%PYROOT%\current"
-if defined PYVER if exist "%PYROOT%\%PYVER%\python.exe" set "PY=%PYROOT%\%PYVER%\python.exe"
-if defined PY goto run
 
 for /d %%d in ("%PYROOT%\*") do if exist "%%d\python.exe" set "PY=%%d\python.exe"
 if defined PY goto run
