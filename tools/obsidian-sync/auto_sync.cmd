@@ -3,40 +3,41 @@ setlocal
 cd /d "%~dp0"
 
 rem ---------------------------------------------------------------------------
-rem  Scheduled-task entry point. Same job as the double-click launcher in this
-rem  folder, but built for silence:
-rem    - no "pause"  (a scheduled task has no console; pause would hang forever)
-rem    - no Chinese (batch files are parsed with the OEM code page - mixing in
-rem                    UTF-8 Chinese can break the parser on another machine)
-rem    - output goes to .sync.log next to this file instead of a console
+rem  Scheduled-task entry point: syncs daily reports into this Obsidian vault.
+rem  - no "pause"  (a scheduled task has no console; pause would hang forever)
+rem  - no Chinese in the batch body (OEM code page would break the parser)
+rem  - output goes to .sync.log next to this file (dot-prefix = hidden from Obsidian)
 rem
-rem  Registered as the Windows task "JournalAlertObsidianSync".
-rem  Keep the log name starting with a dot: Obsidian ignores dot-files, so it
-rem  will not show up in your vault's file list or search.
+rem  Python lookup, in order:
+rem    1) python on PATH
+rem    2) common install locations
+rem    3) DSH managed runtime (if installed)
 rem ---------------------------------------------------------------------------
 
 set "LOG=%~dp0.sync.log"
 set "PY="
 
-
 where python >nul 2>nul && set "PY=python"
 if defined PY goto run
 
+rem -- common install locations --
+for %%P in (  "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"  "%LOCALAPPDATA%\Programs\Python\Python311\python.exe"  "%LOCALAPPDATA%\Programs\Python\Python310\python.exe"  "C:\Program Files\Python312\python.exe"  "C:\Program Files\Python311\python.exe"
+) do if exist "%%~P" set "PY=%%~P"
 
-for /d %%d in ("%PYROOT%\*") do if exist "%%d\python.exe" set "PY=%%d\python.exe"
+rem -- DSH managed runtime --
+if not defined PY for /d %%D in ("%USERPROFILE%\.dsh\dsh-runtimes\*") do if exist "%%D\python.exe" set "PY=%%D\python.exe"
+
 if defined PY goto run
 
 echo [%DATE% %TIME%] ERROR - Python not found. >> "%LOG%"
 exit /b 2
 
 :run
-rem Keep the log from growing forever (roughly ten years of runs, then cycle).
+rem Keep the log from growing forever (~10 years of runs, then cycle).
 for %%A in ("%LOG%") do if %%~zA GTR 524288 del "%LOG%"
 
-rem Only Python writes to the log (the --stamp flag makes it print the run
-rem timestamp). Do NOT add "echo" lines here: batch echoes come out in the OEM
-rem code page while Python uses its own encoding, and a log with both in it
-rem cannot be decoded by either.
+rem Only Python writes to the log (--stamp prints the run timestamp from Python,
+rem keeping the log in a single consistent encoding).
 echo. >> "%LOG%"
 "%PY%" "%~dp0sync_reports.py" --stamp >> "%LOG%" 2>&1
 exit /b %ERRORLEVEL%
