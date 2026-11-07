@@ -30,7 +30,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-REPO = "pkui1mpression-design/Journal-alert"
+REPO = "pure-wang/article"
 FOLDER = "reports"
 API = "https://api.github.com"
 UA = "jalert-obsidian-sync"
@@ -51,12 +51,17 @@ def say(message: str = "") -> None:
     print(message, flush=True)
 
 
+def _encode_api_path(path: str) -> str:
+    import urllib.parse
+    return "/".join(urllib.parse.quote(p, safe="") for p in path.split("/") if p)
+
+
 def api_get(path: str) -> object:
     """GET API，带重试。公开仓库，不带认证头。"""
     last = None
     for attempt in range(1, RETRIES + 1):
         req = urllib.request.Request(
-            API + path,
+            API + _encode_api_path(path),
             headers={"Accept": "application/vnd.github+json", "User-Agent": UA},
         )
         try:
@@ -99,7 +104,21 @@ def main() -> int:
     say()
 
     try:
-        entries = api_get(f"/repos/{REPO}/contents/{FOLDER}")
+        md_entries = []
+        subdirs = [""]
+        while subdirs:
+            cur = subdirs.pop()
+            fp = (FOLDER + cur + "/") if cur else FOLDER
+            entries = api_get(f"/repos/{REPO}/contents/{fp}")
+            if not isinstance(entries, list):
+                continue
+            for e in entries:
+                if e.get("type") == "dir":
+                    subdirs.append("/" + e["name"])
+                elif e.get("type") == "file" and e["name"].endswith(".md"):
+                    e["_rel"] = (cur + "/" + e["name"]) if cur else e["name"]
+                    md_entries.append(e)
+        remote = sorted(md_entries, key=lambda e: e["_rel"], reverse=True)
     except urllib.error.HTTPError as exc:
         say(f"[失败] GitHub API 返回 HTTP {exc.code}")
         say("       公开仓库不该出现 401/403，若是 404 请确认仓库地址和目录名。")
@@ -109,17 +128,11 @@ def main() -> int:
         say("       检查一下网络；本脚本走 api.github.com，不经过 git 通道。")
         return 1
 
-    if not isinstance(entries, list):
-        say("[失败] API 返回的不是目录列表。")
-        return 1
-
-    remote = [e for e in entries if e.get("type") == "file" and e["name"].endswith(".md")]
-    remote.sort(key=lambda e: e["name"], reverse=True)
 
     if list_only:
         say(f"远端共有 {len(remote)} 篇日报：")
         for entry in remote:
-            say(f"  {entry['name']}  {entry['size']:>7} bytes  {entry['sha'][:10]}")
+            say(f"  {entry['_rel']}  {entry['size']:>7} bytes  {entry['sha'][:10]}")
         return 0
 
     if not remote:
@@ -130,8 +143,9 @@ def main() -> int:
 
     added, changed, same, failed = [], [], [], []
     for entry in remote:
-        name = entry["name"]
+        name = entry["_rel"]
         target = DEST / name
+        target.parent.mkdir(parents=True, exist_ok=True)
         try:
             raw = entry.get("content")
             if not raw:
