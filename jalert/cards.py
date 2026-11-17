@@ -516,6 +516,22 @@ svg.ic{display:block;flex:none}
 .btn:hover{border-color:#d8d8e0;transform:translateY(-1px)}
 .btn.pri{background:var(--red);border-color:var(--red);color:#fff;box-shadow:0 3px 12px rgba(255,36,66,.28)}
 .btn.pri:hover{background:#f01a38}
+
+/* ---- 增量：个人批注 & 已读标记 ---- */
+.noterow{margin-top:9px}
+.note{width:100%;min-height:52px;max-height:220px;border:1px solid var(--line);border-radius:10px;background:#fafafa;padding:7px 9px;font-size:12px;line-height:1.55;font-family:inherit;color:var(--ink);resize:vertical;outline:none;transition:border-color .15s,box-shadow .15s;cursor:text}
+.note:focus{border-color:#ffc2cc;box-shadow:0 0 0 3px rgba(255,36,66,.08);background:#fff}
+.note::placeholder{color:var(--ink3)}
+.notebtns{display:flex;gap:6px;margin-top:6px}
+.readbtn{border:1px solid #ffd5db;background:#fff;color:#e01b39;font-size:11.5px;font-weight:700;padding:5px 11px;border-radius:999px;cursor:pointer;font-family:inherit;transition:.15s}
+.readbtn:hover{background:#ff2442;border-color:#ff2442;color:#fff}
+.unbtn{border:1px solid var(--line);background:#fff;color:var(--ink2);font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:999px;cursor:pointer;font-family:inherit;transition:.15s}
+.unbtn:hover{border-color:#d8d8e0;transform:translateY(-1px)}
+.tag.isread{background:#e6f7f0;color:#0b9e73}
+.card.isread{box-shadow:0 0 0 2px rgba(11,158,115,.35) inset,var(--sh)}
+.mnote{width:100%;min-height:96px;border:1px solid var(--line);border-radius:10px;background:#fafafa;padding:10px 12px;font-size:13px;line-height:1.6;font-family:inherit;color:var(--ink);resize:vertical;outline:none;cursor:text}
+.mnote:focus{border-color:#ffc2cc;box-shadow:0 0 0 3px rgba(255,36,66,.08);background:#fff}
+
 </style>
 </head>
 <body>
@@ -529,6 +545,7 @@ svg.ic{display:block;flex:none}
       <div class="spacer"></div>
       <div class="kpi">
         <span>总文献 <b>__TOTAL__</b></span>
+        <span>已读 <b id="kpi-read">0</b></span>
         <span>数据源 <b id="kpi-days">—</b> 天日报</span>
         <span>更新 <b>__GEN__</b></span>
       </div>
@@ -579,7 +596,8 @@ svg.ic{display:block;flex:none}
     wx:    '<path d="M13.2 2.6 4.4 13.8h6.2l-1 7.6 8.8-11.2h-6.2l1-7.6z"/>',
     gis:   '<path d="M9 3.4 3.5 5.8v14.8L9 18.2l6 2.4 5.5-2.4V3.4L15 5.8 9 3.4z"/><path d="M9 3.4v14.8"/><path d="M15 5.8v14.8"/>',
     other: '<path d="M14 3H7.6A2 2 0 0 0 5.6 5v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7.6L14 3z"/><path d="M14 3v4.6h4.6"/>',
-    search:'<circle cx="11" cy="11" r="7"/><path d="M20.2 20.2l-4.3-4.3"/>'
+    search:'<circle cx="11" cy="11" r="7"/><path d="M20.2 20.2l-4.3-4.3"/>',
+    read:  '<circle cx="12" cy="12" r="9"/><path d="M8.4 12.3l2.4 2.4 4.8-5"/>'
   };
   function svg(k, cls){
     return '<svg class="'+(cls||'ic')+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
@@ -587,6 +605,38 @@ svg.ic{display:block;flex:none}
   }
 
   var state = { topic:'all', tier:'all', sort:'score', q:'' };
+
+  /* ---- 增量：个人批注 & 已读标记（localStorage 持久化，换页面/刷新不丢）----
+     以 DOI（无 DOI 用标题）为键，与文章数组顺序无关，日报更新后仍对得上。 */
+  var RKEY = 'jalert-wall-notes-v1';
+  var R = {};
+  try { R = JSON.parse(localStorage.getItem(RKEY)) || {}; } catch(e) { R = {}; }
+  function saveR(){ try { localStorage.setItem(RKEY, JSON.stringify(R)); } catch(e) {} }
+  function akey(a){ return (a.doi || ('t:' + a.title)).toLowerCase(); }
+  function isRead(a){ var r = R[akey(a)]; return !!(r && r.read); }
+  function noteOf(a){ var r = R[akey(a)]; return (r && r.note) || ''; }
+  function setNote(a, text){
+    var k = akey(a);
+    if (!R[k]) R[k] = { read: false, note: '', ts: 0 };
+    R[k].note = text;
+    R[k].ts = Date.now();
+    saveR();
+  }
+  function setRead(a, on){
+    var k = akey(a);
+    if (!R[k]) R[k] = { read: false, note: noteOf(a), ts: 0 };
+    R[k].read = on;
+    R[k].ts = Date.now();
+    saveR();
+    updateReadBadge();
+  }
+  function readCount(){ return A.filter(isRead).length; }
+  function updateReadBadge(){
+    var n = readCount();
+    if (readTabN) readTabN.textContent = n;
+    var kpi = document.getElementById('kpi-read');
+    if (kpi) kpi.textContent = n;
+  }
 
   /* An article can hit several keyword groups at once. a.topics holds every
      match (used for filtering); a.topic is the primary one (used for the cover
@@ -602,14 +652,20 @@ svg.ic{display:block;flex:none}
   });
 
   var tabDefs = [{k:'all',label:'全部',icon:'all'}].concat(
-    TOPICS.map(function(t){ return {k:t,label:t,icon:THEME[t]||'other'}; })
+    TOPICS.map(function(t){ return {k:t,label:t,icon:THEME[t]||'other'}; }),
+    [{k:'__read__',label:'已读',icon:'read'}]
   );
+  var readTabN = null;
   tabDefs.forEach(function(d){
     var b = document.createElement('button');
     b.className = 'tab' + (d.k==='all'?' on':'');
     b.type = 'button';
     var n = d.k==='all' ? C.all : (C[d.k]||0);
     b.innerHTML = svg(d.icon) + '<span>'+d.label+'</span><span class="n">'+n+'</span>';
+    if(d.k==='__read__'){
+      readTabN = b.querySelector('.n');
+      readTabN.textContent = 0;
+    }
     b.onclick = function(){
       state.topic = d.k;
       [].forEach.call(tabs.children, function(x){ x.classList.toggle('on', x===b); });
@@ -655,7 +711,10 @@ svg.ic{display:block;flex:none}
   function select(){
     var q = state.q;
     var out = A.filter(function(a){
-      if(state.topic!=='all' && topicsOf(a).indexOf(state.topic)<0) return false;
+      /* 增量：已读标签页只看已读；其余视图一律隐藏已读（已读卡片只出现在已读区） */
+      if(state.topic==='__read__'){ if(!isRead(a)) return false; }
+      else if(isRead(a)) return false;
+      if(state.topic!=='all' && state.topic!=='__read__' && topicsOf(a).indexOf(state.topic)<0) return false;
       if(state.tier!=='all' && a.tier!==state.tier) return false;
       if(q){
         var hay = (a.title+' '+a.abstract+' '+a.authors.join(' ')+' '+a.journal+' '+a.doi).toLowerCase();
@@ -688,7 +747,21 @@ svg.ic{display:block;flex:none}
 
     var au = esc(a.authors[0] || '佚名') + (a.authors.length>1 ? ' 等 '+(a.authors.length-1)+' 位' : '');
 
-    return '<article class="card t-'+a.tkey+'" data-id="'+a.id+'" tabindex="0">'
+    /* 增量：已读徽标 + 批注框 + 已读/恢复按钮（样式与原有 tag/button 体系一致） */
+    var read = isRead(a);
+    var tags2 = read ? '<span class="tag isread">✓ 已读</span>' : '';
+    var noteVal = esc(noteOf(a));
+    var noterow =
+      '<div class="noterow">'
+      + '<textarea class="note" data-id="'+a.id+'" placeholder="个人批注 & 总结笔记…（自动保存）">'+noteVal+'</textarea>'
+      + '<div class="notebtns">'
+      +   (read
+            ? '<button class="unbtn" type="button" data-id="'+a.id+'">恢复未读</button>'
+            : '<button class="readbtn" type="button" data-id="'+a.id+'">✓ 标记为已读</button>')
+      + '</div>'
+      + '</div>';
+
+    return '<article class="card t-'+a.tkey+(read?' isread':'')+'" data-id="'+a.id+'" tabindex="0">'
       + '<div class="cover">'
       +   '<div class="tp">'+esc(a.topic)+'</div>'
       +   (a.score!=null ? '<div class="sc">★ '+a.score+'</div>' : '')
@@ -699,7 +772,8 @@ svg.ic{display:block;flex:none}
       + '<div class="body">'
       +   '<h3 class="title">'+esc(a.title)+'</h3>'
       +   ab
-      +   '<div class="tagrow">'+tags+'</div>'
+      +   '<div class="tagrow">'+tags2+tags+'</div>'
+      +   noterow
       + '</div>'
       + '<div class="foot">'
       +   '<div class="av">'+esc(initial(a.authors[0]))+'</div>'
@@ -715,12 +789,16 @@ svg.ic{display:block;flex:none}
 
   function render(){
     var list = select();
-    var scope = (state.topic==='all' ? '全部学科' : state.topic)
+    var readTotal = readCount();
+    var scope = (state.topic==='all' ? '全部学科' : (state.topic==='__read__' ? '已读文献' : state.topic))
               + (state.tier==='all' ? '' : ' · '+TIER_NAME[state.tier]);
-    countEl.textContent = scope + ' ｜ ' + list.length + ' / ' + A.length + ' 篇';
+    countEl.textContent = scope + ' ｜ ' + list.length
+      + (state.topic==='__read__' ? ' / '+readTotal+' 篇' : ' / ' + A.length + ' 篇');
 
     if(!list.length){
-      wrap.innerHTML = '<div class="empty">'+svg('search')+'没有匹配的文献，换个关键词或学科试试</div>';
+      wrap.innerHTML = '<div class="empty">'+svg('search')
+        +(state.topic==='__read__' && !readTotal ? '还没有标记已读的文献。在卡片上点「✓ 标记为已读」，读过就会收进这里。' : '没有匹配的文献，换个关键词或学科试试')
+        +'</div>';
       return;
     }
 
@@ -741,6 +819,21 @@ svg.ic{display:block;flex:none}
         html += '<div class="grouphead"><h2>'+svg('other')+'其他</h2>'
               + '<span class="gn">'+rest.length+' 篇</span><div class="bar"></div></div>'
               + '<div class="wall">'+rest.map(cardHTML).join('')+'</div>';
+      }
+      /* 增量：默认视图底部追加「已读文献」区（list 已被 select 排除已读，这里单独取） */
+      var rd = A.filter(function(a){
+        if(!isRead(a)) return false;
+        if(state.tier!=='all' && a.tier!==state.tier) return false;
+        if(state.q){
+          var hay = (a.title+' '+a.abstract+' '+a.authors.join(' ')+' '+a.journal+' '+a.doi).toLowerCase();
+          if(hay.indexOf(state.q)<0) return false;
+        }
+        return true;
+      });
+      if(rd.length){
+        html += '<div class="grouphead"><h2>'+svg('read')+'已读文献</h2>'
+              + '<span class="gn">'+rd.length+' 篇</span><div class="bar"></div></div>'
+              + '<div class="wall">'+rd.map(cardHTML).join('')+'</div>';
       }
     } else {
       html = '<div class="wall">'+list.map(cardHTML).join('')+'</div>';
@@ -771,10 +864,13 @@ svg.ic{display:block;flex:none}
       +   '<div class="sec-t">作者</div><p class="authors">'+esc(authors)+'</p>'
       +   (a.doi ? '<div class="kv">DOI：<code>'+esc(a.doi)+'</code></div>' : '')
       +   (a.matchWhere ? '<div class="kv">关键词命中：'+esc(a.matchWhere)+'</div>' : '')
+      +   '<div class="sec-t">个人批注 & 总结</div>'
+      +   '<textarea class="mnote" id="mnote" placeholder="在这里写你的批注与总结…（自动保存）">'+esc(noteOf(a))+'</textarea>'
       +   '<div class="linkrow">'
       +     '<a class="btn pri" href="'+esc(a.url)+'" target="_blank" rel="noopener">打开原文 ↗</a>'
       +     (a.doi?'<a class="btn" href="https://doi.org/'+esc(a.doi)+'" target="_blank" rel="noopener">DOI 链接</a>':'')
       +     '<button class="btn" id="mcopy" type="button">复制 DOI</button>'
+      +     '<button class="btn" id="mtoggle" type="button">'+(isRead(a)?'恢复未读':'✓ 标记为已读')+'</button>'
       +   '</div>'
       + '</div>';
     mask.classList.add('on');
@@ -788,18 +884,44 @@ svg.ic{display:block;flex:none}
         navigator.clipboard.writeText(txt).then(done, function(){ cp.textContent = txt; });
       } else { cp.textContent = txt; }
     };
+    /* 增量：弹窗内批注（同一存储，卡片和弹窗实时一致） */
+    var mn = document.getElementById('mnote');
+    if(mn) mn.oninput = function(){ setNote(a, mn.value); };
+    var mt = document.getElementById('mtoggle');
+    if(mt) mt.onclick = function(){
+      setRead(a, !isRead(a));
+      closeModal();
+      render();
+    };
   }
   function closeModal(){ mask.classList.remove('on'); document.body.style.overflow=''; }
   mask.onclick = closeModal;
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeModal(); });
 
   wrap.addEventListener('click', function(e){
+    /* 增量：批注框与按钮不触发详情弹窗 */
+    if(e.target.closest('.note')) return;
+    var rb = e.target.closest('.readbtn');
+    if(rb){ var ca = A[+rb.dataset.id]; if(ca){ setRead(ca, true); render(); } return; }
+    var ub = e.target.closest('.unbtn');
+    if(ub){ var ua = A[+ub.dataset.id]; if(ua){ setRead(ua, false); render(); } return; }
     var c = e.target.closest('.card'); if(c) openModal(+c.dataset.id);
   });
+  /* 增量：批注输入 → 自动保存（防抖 300ms） */
+  var noteT;
+  wrap.addEventListener('input', function(e){
+    var t = e.target.closest('.note'); if(!t) return;
+    var a = A[+t.dataset.id]; if(!a) return;
+    clearTimeout(noteT);
+    noteT = setTimeout(function(){ setNote(a, t.value); }, 300);
+  });
   wrap.addEventListener('keydown', function(e){
+    /* 增量：在批注框内 Enter 换行，不触发弹窗 */
+    if(e.key==='Enter' && e.target.closest('.note')) return;
     if(e.key==='Enter'){ var c = e.target.closest('.card'); if(c) openModal(+c.dataset.id); }
   });
 
+  updateReadBadge();
   render();
 })();
 </script>
