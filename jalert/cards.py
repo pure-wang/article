@@ -278,6 +278,35 @@ def build_html(articles: list[dict], reports: list[dict], topics: list[str],
     )
 
 
+def load_keyword_groups(config_path: Path | str = "config.json") -> tuple[list[str], list[dict]]:
+    """Read ``config.json`` for ``(topic labels, keyword groups)``.
+
+    Both the CLI and ``run.py`` build the page through here, so a caller that
+    only passes ``topic_labels`` still gets the keyword groups embedded for the
+    in-page "手动添加" classifier. Missing or broken config is not fatal.
+    """
+    candidates = [Path(config_path), Path(__file__).resolve().parent.parent / "config.json"]
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            cfg = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        labels = [k.get("label", "") for k in cfg.get("keywords", [])]
+        groups = [
+            {
+                "label": k.get("label", ""),
+                "weight": int(k.get("weight", 3)),
+                "terms": [t for t in (k.get("terms") or [k.get("term", "")]) if t and t.strip()],
+            }
+            for k in cfg.get("keywords", [])
+            if k.get("label") or k.get("term")
+        ]
+        return labels, groups
+    return [], []
+
+
 def write_cards(reports_dir: Path, out_path: Path, *, project: str = "文献日报",
                 topic_labels: list[str] | None = None, log=None,
                 keyword_groups: list[dict] | None = None,
@@ -287,6 +316,12 @@ def write_cards(reports_dir: Path, out_path: Path, *, project: str = "文献日�
 
     Returns the written path, or ``None`` when there is nothing to publish.
     """
+    if keyword_groups is None or topic_labels is None:
+        cfg_labels, cfg_groups = load_keyword_groups()
+        if keyword_groups is None:
+            keyword_groups = cfg_groups
+        if topic_labels is None:
+            topic_labels = cfg_labels
     articles, reports, topics = collect(Path(reports_dir), topic_labels)
     if not articles:
         if log:
@@ -343,6 +378,8 @@ def main(argv: list[str] | None = None) -> int:
             ]
         except (OSError, json.JSONDecodeError) as exc:
             print(f"警告：{cfg_path} 读取失败（{exc}），改用日报里的标签顺序。")
+    else:
+        topic_labels, keyword_groups = load_keyword_groups(cfg_path)
 
     written = write_cards(Path(args.reports), Path(args.out),
                           project=args.project, topic_labels=topic_labels,
