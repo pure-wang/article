@@ -245,7 +245,10 @@ def collect(reports_dir: Path, topic_labels: list[str] | None = None
 
 
 def build_html(articles: list[dict], reports: list[dict], topics: list[str],
-               *, project: str, generated_at: str) -> str:
+               *, project: str, generated_at: str,
+               keyword_groups: list[dict] | None = None,
+               repo: str = "pure-wang/article",
+               workflow: str = "daily.yml") -> str:
     """Render the self-contained page."""
     payload = json.dumps(
         {
@@ -255,6 +258,10 @@ def build_html(articles: list[dict], reports: list[dict], topics: list[str],
             "themeKeys": list(THEME_KEYS),
             "topicTheme": THEME_BY_TOPIC,
             "generated": generated_at,
+            # 增量：手动添加用 —— 关键词组（浏览器里预览分类）与仓库信息（提交落盘）
+            "kw": keyword_groups or [],
+            "repo": repo,
+            "workflow": workflow,
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -272,7 +279,10 @@ def build_html(articles: list[dict], reports: list[dict], topics: list[str],
 
 
 def write_cards(reports_dir: Path, out_path: Path, *, project: str = "文献日报",
-                topic_labels: list[str] | None = None, log=None) -> Path | None:
+                topic_labels: list[str] | None = None, log=None,
+                keyword_groups: list[dict] | None = None,
+                repo: str = "pure-wang/article",
+                workflow: str = "daily.yml") -> Path | None:
     """Build the page from ``reports_dir`` into ``out_path``.
 
     Returns the written path, or ``None`` when there is nothing to publish.
@@ -287,7 +297,8 @@ def write_cards(reports_dir: Path, out_path: Path, *, project: str = "文献日�
     out_path.parent.mkdir(parents=True, exist_ok=True)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     out_path.write_text(
-        build_html(articles, reports, topics, project=project, generated_at=generated_at),
+        build_html(articles, reports, topics, project=project, generated_at=generated_at,
+                   keyword_groups=keyword_groups, repo=repo, workflow=workflow),
         encoding="utf-8",
         newline="\n",
     )
@@ -304,22 +315,39 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project", default="文献日报", help="project name shown in the header")
     parser.add_argument("--config", default="config.json",
                         help="config.json, read only to get the keyword label order")
+    parser.add_argument("--repo", default="pure-wang/article",
+                        help="owner/name of the GitHub repo the add button writes to")
+    parser.add_argument("--workflow", default="daily.yml",
+                        help="workflow file the add button triggers after committing")
     args = parser.parse_args(argv)
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     topic_labels: list[str] = []
+    keyword_groups: list[dict] = []
     cfg_path = Path(args.config)
     if cfg_path.is_file():
         try:
             cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
             topic_labels = [k.get("label", "") for k in cfg.get("keywords", [])]
+            # 增量：把关键词组原样带给页面，手动添加时可离线预览分类。
+            keyword_groups = [
+                {
+                    "label": k.get("label", ""),
+                    "weight": int(k.get("weight", 3)),
+                    "terms": [t for t in (k.get("terms") or [k.get("term", "")]) if t and t.strip()],
+                }
+                for k in cfg.get("keywords", [])
+                if k.get("label") or k.get("term")
+            ]
         except (OSError, json.JSONDecodeError) as exc:
             print(f"警告：{cfg_path} 读取失败（{exc}），改用日报里的标签顺序。")
 
     written = write_cards(Path(args.reports), Path(args.out),
-                          project=args.project, topic_labels=topic_labels)
+                          project=args.project, topic_labels=topic_labels,
+                          keyword_groups=keyword_groups,
+                          repo=args.repo, workflow=args.workflow)
     if written is None:
         print(f"没有在 {args.reports} 找到任何日报，未生成页面。")
         return 1
@@ -532,6 +560,29 @@ svg.ic{display:block;flex:none}
 .mnote{width:100%;min-height:96px;border:1px solid var(--line);border-radius:10px;background:#fafafa;padding:10px 12px;font-size:13px;line-height:1.6;font-family:inherit;color:var(--ink);resize:vertical;outline:none;cursor:text}
 .mnote:focus{border-color:#ffc2cc;box-shadow:0 0 0 3px rgba(255,36,66,.08);background:#fff}
 
+/* ---- 增量：手动添加文献 ---- */
+.addbtn{border:1px solid #ffd5db;background:#fff;color:#e01b39;font-size:12.5px;font-weight:700;padding:5px 12px;border-radius:999px;cursor:pointer;font-family:inherit;transition:.16s;white-space:nowrap}
+.addbtn:hover{background:var(--red);border-color:var(--red);color:#fff}
+.addform .fld{display:flex;flex-direction:column;gap:5px;margin-bottom:11px;min-width:0}
+.addform .fld label{font-size:11px;font-weight:800;color:var(--ink3);letter-spacing:.7px}
+.addform .fld input,.addform .fld select,.addform .fld textarea{
+  width:100%;border:1px solid var(--line);border-radius:10px;background:#fafafa;padding:8px 11px;
+  font-size:13px;font-family:inherit;color:var(--ink);outline:none;transition:border-color .15s,box-shadow .15s;cursor:text;
+}
+.addform .fld select{cursor:pointer}
+.addform .fld input:focus,.addform .fld select:focus,.addform .fld textarea:focus{border-color:#ffc2cc;box-shadow:0 0 0 3px rgba(255,36,66,.08);background:#fff}
+.addform .row2{display:flex;gap:11px}
+.addform .row2 > .fld{flex:1}
+.hint{font-size:12px;color:var(--ink2);line-height:1.68;margin:0 0 12px}
+.hint b{color:var(--red)}
+.kwprev{background:#f8f8fb;border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:12.5px;line-height:1.72;color:var(--ink2);margin:0 0 12px}
+.kwprev b{color:#e01b39}
+.bm{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 4px}
+.bm a.btn{cursor:grab;text-decoration:none}
+.status{font-size:12.5px;line-height:1.65;margin-top:11px;color:var(--ink2)}
+.status.err{color:#d21f3c} .status.ok{color:#0b9e73;font-weight:600}
+.mdprev{display:none;background:#f8f8fb;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:11.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;margin-top:11px;color:#3a3a44}
+
 </style>
 </head>
 <body>
@@ -543,6 +594,7 @@ svg.ic{display:block;flex:none}
       <h1>__PROJECT__ · 文献卡片墙</h1>
       <span class="sub">journal-alert · 日报可视化</span>
       <div class="spacer"></div>
+      <button class="addbtn" id="addopen" type="button">＋ 添加文献</button>
       <div class="kpi">
         <span>总文献 <b>__TOTAL__</b></span>
         <span>已读 <b id="kpi-read">0</b></span>
@@ -898,6 +950,290 @@ svg.ic{display:block;flex:none}
   mask.onclick = closeModal;
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') closeModal(); });
 
+  /* ---- 增量：手动添加文献 ----
+     书签只把期刊页上的元数据塞进 #add=（不携带任何令牌），真正的写入在本页完成。
+     令牌只存在本浏览器的 localStorage，不进书签、不进 URL。
+     条目写成和日报一样的 Markdown，落到 reports/manual/<日期>.md，解析器无需改动。 */
+  var PATKEY = 'jalert-gh-pat-v1';
+  var MANUAL_TOPIC = '杂文献';
+  function getPat(){ try { return localStorage.getItem(PATKEY) || ''; } catch(e){ return ''; } }
+  function savePat(v){ try { localStorage.setItem(PATKEY, v); } catch(e){} }
+  function todayISO(){
+    var d = new Date(), p = function(n){ return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function kwEscape(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  function kwRe(term){ return new RegExp('(?<![a-z0-9])' + kwEscape(term) + '(?![a-z0-9])', 'i'); }
+
+  /* 与 jalert/score.py 同一套规则：标题命中 ×3、摘要命中 ×1，各组取最好的一条。 */
+  function classify(title, abstract){
+    title = title || ''; abstract = abstract || '';
+    var hits = [];
+    (D.kw || []).forEach(function(g){
+      var terms = g.terms || [], hit = null, i;
+      for (i = 0; i < terms.length && !hit; i++){
+        if (kwRe(terms[i]).test(title)) hit = { label: g.label, term: terms[i], where: '标题', pts: (g.weight || 3) * 3 };
+      }
+      if (!hit) for (i = 0; i < terms.length; i++){
+        if (kwRe(terms[i]).test(abstract)) { hit = { label: g.label, term: terms[i], where: '摘要', pts: (g.weight || 3) }; break; }
+      }
+      if (hit) hits.push(hit);
+    });
+    var score = 0;
+    hits.forEach(function(h){ score += h.pts; });
+    return {
+      hits: hits,
+      score: hits.length ? score : null,
+      tier: score >= 12 ? 'must_read' : (score >= 6 ? 'worth_reading' : 'other'),
+      label: hits.length ? hits[0].label : MANUAL_TOPIC
+    };
+  }
+  function matchLineOf(hits){
+    if (!hits.length) return MANUAL_TOPIC;
+    return hits.map(function(h){
+      return h.label + '（' + h.where + '：' + String(h.term).replace(/[、（）]/g, ' ') + '）';
+    }).join('、');
+  }
+  function cleanTitle(t){ return String(t || '').replace(/[\[\]\r\n]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function buildMarkdown(p, n){
+    var title = cleanTitle(p.title);
+    /* 没有 DOI/链接时必须给一个可用的兜底链接：空括号会让解析器丢条目。 */
+    var url = (p.url || '').trim() || (p.doi ? 'https://doi.org/' + p.doi
+              : 'https://scholar.google.com/scholar?q=' + encodeURIComponent(title));
+    url = url.replace(/\(/g, '%28').replace(/\)/g, '%29');
+    var meta = [];
+    if (p.journal) meta.push('**期刊**：' + String(p.journal).replace(/\s+/g, ' ').trim());
+    meta.push('**日期**：' + (p.date || todayISO()));
+    if (p.doi) meta.push('**DOI**：[' + p.doi + '](https://doi.org/' + p.doi + ')');
+    var lines = ['## ' + p.tierTitle + '（1）', '', '### ' + n + '. [' + title + '](' + url + ')',
+                 '- ' + meta.join(' ｜ ')];
+    lines.push('- **匹配**：' + p.matchLine + (p.score != null ? ' ｜ **得分**：' + p.score : ''));
+    if (p.authors && p.authors.length) lines.push('- **作者**：' + p.authors.join(', '));
+    if (p.abstract) lines.push('', '> ' + String(p.abstract).replace(/\s+/g, ' ').trim());
+    return lines.join('\n') + '\n';
+  }
+  function b64enc(s){
+    var bytes = new TextEncoder().encode(s), bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function b64dec(b64){
+    var bin = atob(String(b64 || '').replace(/\s/g, ''));
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+  function ghApi(path, opts){
+    opts = opts || {};
+    var headers = { 'Accept': 'application/vnd.github+json' };
+    var pat = opts.pat || getPat();
+    if (pat) headers['Authorization'] = 'Bearer ' + pat;
+    if (opts.body) headers['Content-Type'] = 'application/json';
+    opts.headers = headers;
+    opts.pat = undefined;
+    return fetch('https://api.github.com/repos/' + D.repo + path, opts);
+  }
+  function makeBookmarklet(){
+    var target = location.origin + location.pathname + '#add=';
+    var code = '(function(){'
+      + 'var m=function(n){var e=document.querySelector(\'meta[name="\'+n+\'"]\')||document.querySelector(\'meta[property="\'+n+\'"]\');return e?e.content:\'\'};'
+      + 'var ms=function(n){var o=[];document.querySelectorAll(\'meta[name="\'+n+\'"]\').forEach(function(e){o.push(e.content)});return o};'
+      + 'var doi=m(\'citation_doi\')||m(\'dc.identifier\')||m(\'prism.doi\')||\'\';'
+      + 'if(!doi){var t=(document.body.innerText||\'\').slice(0,8000);var r=t.match(/10\\.[0-9]{4,9}\\/[^\\s"<>]+/);doi=r?r[0]:\'\'}'
+      + 'doi=doi.replace(/^https?:\\/\\/(dx\\.)?doi\\.org\\//i,\'\').replace(/[.,;]+$/,\'\');'
+      + 'var d={title:m(\'citation_title\')||m(\'dc.title\')||document.title,'
+      + 'authors:ms(\'citation_author\').concat(ms(\'dc.creator\')),'
+      + 'journal:m(\'citation_journal_title\')||m(\'prism.publicationName\')||m(\'dc.source\'),'
+      + 'date:m(\'citation_publication_date\')||m(\'citation_date\')||m(\'dc.date\'),'
+      + 'doi:doi,url:location.href,'
+      + 'abstract:m(\'citation_abstract\')||m(\'dc.description\')||m(\'description\')||\'\'};'
+      + 'location.href=' + JSON.stringify(target) + '+encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(d)))))'
+      + '})()';
+    return 'javascript:' + code;
+  }
+
+  function openAdd(pre){
+    pre = pre || {};
+    var topicsAll = TOPICS.slice();
+    if (topicsAll.indexOf(MANUAL_TOPIC) < 0) topicsAll.push(MANUAL_TOPIC);
+    var auto = classify(pre.title || '', pre.abstract || '');
+    var topicHtml = '<option value="">自动判断</option>'
+      + topicsAll.map(function(t){ return '<option value="' + esc(t) + '">' + esc(t) + '</option>'; }).join('');
+    var tierHtml = '<option value="">自动判断</option>'
+      + ['must_read', 'worth_reading', 'other'].map(function(k){
+          return '<option value="' + k + '"' + (auto.tier === k && !auto.hits.length ? '' : '') + '>' + TIER_NAME[k] + '</option>';
+        }).join('');
+    var authText = (pre.authors || []).join(', ');
+    var pat = getPat();
+
+    modal.innerHTML =
+      '<div class="mhead" style="background:linear-gradient(135deg,var(--other-a),var(--other-b))">'
+      + '<button class="mclose" id="mclose" type="button">✕</button>'
+      + '<div class="mj">手动添加 · 写入 reports/manual/</div>'
+      + '<h3>添加到卡片墙</h3>'
+      + '</div>'
+      + '<div class="mbody addform">'
+      +   '<p class="hint">在期刊/PubMed 页面点<b>书签</b>可自动填好下面字段；也可以直接手填。分类按本地关键词规则自动判断，可手动改；分不进任何组的归<b>杂文献</b>。提交后写入仓库并触发重建，约 1–2 分钟上线。</p>'
+      +   '<div class="fld"><label>标题 *</label><input id="f-title" type="text" value="' + esc(pre.title || '') + '"></div>'
+      +   '<div class="row2">'
+      +     '<div class="fld"><label>期刊</label><input id="f-journal" type="text" value="' + esc(pre.journal || '') + '"></div>'
+      +     '<div class="fld"><label>日期</label><input id="f-date" type="text" placeholder="' + todayISO() + '" value="' + esc((pre.date || '').slice(0, 10)) + '"></div>'
+      +   '</div>'
+      +   '<div class="row2">'
+      +     '<div class="fld"><label>DOI</label><input id="f-doi" type="text" value="' + esc(pre.doi || '') + '"></div>'
+      +     '<div class="fld"><label>原文链接</label><input id="f-url" type="text" value="' + esc(pre.url || '') + '"></div>'
+      +   '</div>'
+      +   '<div class="fld"><label>作者（英文逗号分隔）</label><input id="f-authors" type="text" value="' + esc(authText) + '"></div>'
+      +   '<div class="fld"><label>摘要</label><textarea id="f-abstract" rows="4">' + esc(pre.abstract || '') + '</textarea></div>'
+      +   '<div class="row2">'
+      +     '<div class="fld"><label>分类</label><select id="f-topic">' + topicHtml + '</select></div>'
+      +     '<div class="fld"><label>等级</label><select id="f-tier">' + tierHtml + '</select></div>'
+      +   '</div>'
+      +   '<div class="kwprev" id="f-prev"></div>'
+      +   '<div class="fld"><label>GitHub 令牌（只存本浏览器）</label>'
+      +     '<input id="f-pat" type="password" autocomplete="off" placeholder="github_pat_…" value="' + esc(pat) + '"></div>'
+      +   '<div class="bm">'
+      +     '<a class="btn" id="f-bm" href="#" title="拖到浏览器书签栏">📌 卡片墙书签（拖到书签栏）</a>'
+      +     '<span class="hint" style="margin:0">装一次即可：在任意文献页点书签，自动抓 DOI/标题/摘要并回到这里。</span>'
+      +   '</div>'
+      +   '<div class="linkrow">'
+      +     '<button class="btn pri" id="f-go" type="button">提交到卡片墙</button>'
+      +     '<button class="btn" id="f-md" type="button">预览 Markdown</button>'
+      +   '</div>'
+      +   '<div class="status" id="f-status"></div>'
+      +   '<pre class="mdprev" id="f-mdbox"></pre>'
+      + '</div>';
+
+    mask.classList.add('on');
+    document.body.style.overflow = 'hidden';
+    var cb0 = document.getElementById('mclose'); if(cb0) cb0.onclick = closeModal;
+    var bm = document.getElementById('f-bm'); if(bm) bm.href = makeBookmarklet();
+
+    function val(id){ var e = document.getElementById(id); return e ? e.value.trim() : ''; }
+    function compute(){
+      var title = val('f-title'), abstract = val('f-abstract');
+      var auto2 = classify(title, abstract);
+      var topicSel = val('f-topic'), tierSel = val('f-tier');
+      var hits = topicSel ? auto2.hits.filter(function(h){ return h.label === topicSel; }) : auto2.hits;
+      var score = null;
+      if (topicSel) { if (hits.length) { score = 0; hits.forEach(function(h){ score += h.pts; }); } }
+      else score = auto2.score;
+      var tier = tierSel || auto2.tier;
+      var label = topicSel || auto2.label;
+      return {
+        title: title, abstract: abstract,
+        topic: label, hits: hits, score: score, tier: tier,
+        tierTitle: TIER_NAME[tier],
+        matchLine: hits.length ? (topicSel && !auto2.hits.some(function(h){ return h.label === topicSel; }) ? label : matchLineOf(hits)) : label,
+        authors: val('f-authors').split(',').map(function(s){ return s.trim(); }).filter(Boolean),
+        journal: val('f-journal'), date: val('f-date'), doi: val('f-doi'), url: val('f-url')
+      };
+    }
+    function refresh(){
+      var p = compute();
+      var dup = A.filter(function(a){
+        if (p.doi && a.doi) return a.doi.toLowerCase() === p.doi.toLowerCase();
+        return p.title && a.title.toLowerCase() === p.title.toLowerCase();
+      })[0];
+      var lines = ['分类：<b>' + esc(p.topic) + '</b> ｜ 等级：<b>' + esc(p.tierTitle) + '</b>'
+                   + (p.score != null ? ' ｜ 得分：<b>' + p.score + '</b>' : '')];
+      if (p.hits.length) lines.push('命中：' + p.hits.map(function(h){ return esc(h.label) + '（' + h.where + '：' + esc(h.term) + '）'; }).join('、'));
+      else lines.push(p.title ? '没有命中任何关键词组 → 归入「' + MANUAL_TOPIC + '」' : '填入标题后自动判断分类');
+      if (dup) lines.push('⚠ 这篇已经在卡片墙里了（重复添加不会生效）');
+      document.getElementById('f-prev').innerHTML = lines.join('<br>');
+      return p;
+    }
+    function showMarkdown(){
+      var p = refresh();
+      var md = buildMarkdown(p, 1);
+      var box = document.getElementById('f-mdbox');
+      box.textContent = md;
+      box.style.display = box.style.display === 'block' ? 'none' : 'block';
+    }
+    ['f-title', 'f-abstract', 'f-journal', 'f-doi', 'f-url', 'f-date', 'f-authors', 'f-topic', 'f-tier']
+      .forEach(function(id){
+        var el = document.getElementById(id);
+        if (el) el.oninput = refresh, el.onchange = refresh;
+      });
+    document.getElementById('f-md').onclick = showMarkdown;
+    document.getElementById('f-go').onclick = function(){
+      var btn = this, st = document.getElementById('f-status');
+      var p = refresh();
+      if (!p.title) { st.className = 'status err'; st.textContent = '标题不能为空。'; return; }
+      var pat = val('f-pat');
+      if (!pat) { st.className = 'status err'; st.textContent = '请先填入 GitHub 令牌（fine-grained，仅本仓库 Contents 读写 + Actions 读写）。'; return; }
+      savePat(pat);
+      btn.disabled = true;
+      st.className = 'status';
+      st.textContent = '正在写入仓库…';
+      submitEntry(p, pat).then(function(res){
+        st.className = 'status ok';
+        st.innerHTML = '已提交：commit <b>' + esc(res.commit) + '</b>（' + esc(p.topic) + ' · ' + esc(p.tierTitle) + '）'
+          + (res.dispatched ? '，已触发重建，约 1–2 分钟后出现。' : '，请稍后手动刷新。');
+        btn.textContent = '已提交 ✓';
+      }).catch(function(err){
+        st.className = 'status err';
+        st.textContent = '提交失败：' + (err && err.message ? err.message : err);
+        btn.disabled = false;
+      });
+    };
+    refresh();
+  }
+
+  function submitEntry(p, pat){
+    /* 归档目录按“提交日”而不是“发表日期”：日报行表示哪天整理过，
+       文章本身的发表日期仍然写在条目的 **日期** 字段里。 */
+    var path = '/contents/reports/manual/' + todayISO() + '.md';
+    var body = '', sha = null;
+    return ghApi(path + '?ref=main', { pat: pat }).then(function(g){
+      if (g.status === 200) {
+        return g.json().then(function(j){ sha = j.sha; body = b64dec(j.content); });
+      }
+      if (g.status !== 404) throw new Error('读取现有文件失败：HTTP ' + g.status);
+    }).then(function(){
+      var n = (body.match(/^###\s+\d+\./gm) || []).length + 1;
+      var entry = buildMarkdown(p, n);
+      var next = body ? body.replace(/\s*$/, '') + '\n\n' + entry : entry;
+      var payload = {
+        message: 'docs(manual): 手动添加文献「' + cleanTitle(p.title).slice(0, 50) + '」',
+        content: b64enc(next),
+        branch: 'main'
+      };
+      if (sha) payload.sha = sha;
+      return ghApi(path, { method: 'PUT', body: JSON.stringify(payload), pat: pat });
+    }).then(function(put){
+      return put.json().then(function(j){
+        if (put.status !== 200 && put.status !== 201) {
+          throw new Error('写入失败：HTTP ' + put.status + (j && j.message ? ' ' + j.message : ''));
+        }
+        return j;
+      });
+    }).then(function(j){
+      return ghApi('/actions/workflows/' + D.workflow + '/dispatches', {
+        method: 'POST', body: JSON.stringify({ ref: 'main' }), pat: pat
+      }).then(function(dis){
+        return { commit: (j.commit && j.commit.sha || '').slice(0, 7), dispatched: dis.status === 204 };
+      }, function(){
+        return { commit: (j.commit && j.commit.sha || '').slice(0, 7), dispatched: false };
+      });
+    });
+  }
+
+  function readAddHash(){
+    var h = location.hash || '';
+    if (h.indexOf('#add=') !== 0) return null;
+    try {
+      var raw = decodeURIComponent(h.slice(5));
+      var bin = atob(raw);
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var obj = JSON.parse(new TextDecoder().decode(bytes));
+      if (history.replaceState) history.replaceState(null, '', location.pathname + location.search);
+      return obj;
+    } catch (e) { return null; }
+  }
+  document.getElementById('addopen').onclick = function(){ openAdd({}); };
+
   wrap.addEventListener('click', function(e){
     /* 增量：批注框与按钮不触发详情弹窗 */
     if(e.target.closest('.note')) return;
@@ -923,6 +1259,9 @@ svg.ic{display:block;flex:none}
 
   updateReadBadge();
   render();
+  /* 增量：书签带来的 #add= 载荷 → 直接打开添加表单 */
+  var pendingAdd = readAddHash();
+  if (pendingAdd) openAdd(pendingAdd);
 })();
 </script>
 </body>
